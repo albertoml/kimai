@@ -23,7 +23,7 @@
 # ---------------------------------------------------------------------
 
 # Source base, one of: fpm, apache
-ARG BASE="fpm"
+ARG BASE="apache"
 # Kimai branch/tag to run
 ARG KIMAI="main"
 # Timezone for images
