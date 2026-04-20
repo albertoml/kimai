@@ -4,48 +4,48 @@ $DATABASE_BASE = urldecode($argv[2]);
 $DATABASE_PORT = $argv[3];
 $DATABASE_USER = urldecode($argv[4]);
 $DATABASE_PASS = urldecode($argv[5]);
+$DATABASE_DRIVER = isset($argv[6]) ? $argv[6] : 'mysql';
 
 echo "Testing DB:";
 
 try {
-    $pdo = new \PDO("mysql:host=$DATABASE_HOST;dbname=$DATABASE_BASE;port=$DATABASE_PORT", "$DATABASE_USER", "$DATABASE_PASS", [
+    $pdo = new \PDO("$DATABASE_DRIVER:host=$DATABASE_HOST;dbname=$DATABASE_BASE;port=$DATABASE_PORT", "$DATABASE_USER", "$DATABASE_PASS", [
         \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION
     ]);
+    echo "Connected\n";
 } catch(\Exception $ex) {
-    switch ($ex->getCode()) {
-        case 1045:
-            // we can immediately stop here and show the error message
-            echo 'Access denied (1045)';
-            die(1);
-        case 1049:
-            // error "Unknown database (1049)" can be ignored, the database will be created by Kimai
-            return;
-        // a lot of errors share the same meaningless error code zero
-        case 0:
-            // this error includes the database name, so we can only search for the static part of the error message
-            if (stripos($ex->getMessage(), 'SQLSTATE[HY000] [1049] Unknown database') !== false) {
-                // error "Unknown database (1049)" can be ignored, the database will be created by Kimai
-                return;
-            }
-            switch ($ex->getMessage()) {
-                // eg. no response (fw) - the startup script should retry it a couple of times
-                case 'SQLSTATE[HY000] [2002] Operation timed out':
-                    echo 'Operation timed out (0-2002)';
-                    die(4);
-                // special case "localhost" with a stopped db server (should not happen in docker compose setup)
-                case 'SQLSTATE[HY000] [2002] No such file or directory':
-                    echo 'Connection could not be established (0-2002)';
-                    die(5);
-                // using IP with stopped db server - the startup script should retry it a couple of times
-                case 'SQLSTATE[HY000] [2002] Connection refused':
-                    echo 'Connection refused (0-2002)';
-                    die(5);
-            }
-            echo $ex->getMessage() . " (0)";
-            die(7);
-        default:
-            // unknown error
-            echo $ex->getMessage() . " (?)";
-            die(10);
+    $message = $ex->getMessage();
+
+    // Database does not exist - Kimai will create it, so treat as success
+    $dbNotFound =
+        // MySQL: Unknown database (1049)
+        $ex->getCode() == 1049 ||
+        stripos($message, 'Unknown database') !== false ||
+        stripos($message, 'SQLSTATE[HY000] [1049]') !== false ||
+        // PostgreSQL: database "xyz" does not exist
+        (stripos($message, 'does not exist') !== false && stripos($message, 'database') !== false) ||
+        stripos($message, 'SQLSTATE[3D000]') !== false;
+
+    if ($dbNotFound) {
+        echo "Database not found (will be created)\n";
+        exit(0);
     }
+
+    // Access denied / authentication failure - stop retrying immediately
+    $accessDenied =
+        $ex->getCode() == 1045 ||
+        stripos($message, 'Access denied') !== false ||
+        stripos($message, 'SQLSTATE[28000]') !== false ||
+        // PostgreSQL password auth failure
+        stripos($message, 'password authentication failed') !== false ||
+        stripos($message, 'SQLSTATE[28P01]') !== false;
+
+    if ($accessDenied) {
+        echo 'Access denied: ' . $message;
+        die(1);
+    }
+
+    // All other errors (connection timeout, refused, etc.) - caller will retry
+    echo $message;
+    die(7);
 }

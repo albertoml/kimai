@@ -122,6 +122,34 @@ final class InstallCommand extends Command
 
     private function importMigrations(SymfonyStyle $io, OutputInterface $output): void
     {
+        // On a fresh database, use doctrine:schema:create (platform-agnostic) instead of
+        // running MySQL-specific migration files. All existing migrations are then marked
+        // as applied so future incremental migrations work correctly.
+        $schemaManager = $this->connection->createSchemaManager();
+        $isFreshInstall = !$schemaManager->tablesExist(['kimai2_users']);
+
+        if ($isFreshInstall) {
+            $io->text('Detected fresh database, creating schema ...');
+
+            $command = $this->getApplication()->find('doctrine:schema:create');
+            $result = $command->run(new ArrayInput([]), $output);
+            if (0 !== $result) {
+                throw new \Exception('Failed creating database schema.');
+            }
+
+            // Initialise the migrations tracking table
+            $command = $this->getApplication()->find('doctrine:migrations:sync-metadata-storage');
+            $command->run(new ArrayInput([]), $output);
+
+            // Mark all existing migrations as already applied (schema was created directly)
+            $command = $this->getApplication()->find('doctrine:migrations:version');
+            $cmdInput = new ArrayInput(['--add' => true, '--all' => true]);
+            $cmdInput->setInteractive(false);
+            $command->run($cmdInput, $output);
+
+            return;
+        }
+
         $io->text('Creating database ...');
 
         $command = $this->getApplication()->find('doctrine:migrations:migrate');

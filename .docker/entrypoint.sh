@@ -4,6 +4,15 @@ KIMAI=$(cat /opt/kimai/version.txt)
 echo $KIMAI
 
 function waitForDB() {
+  # Detect database driver and default port from URL
+  if [[ "$DATABASE_URL" =~ ^postgresql|^pgsql ]]; then
+    DATABASE_DRIVER="pgsql"
+    DEFAULT_PORT=5432
+  else
+    DATABASE_DRIVER="mysql"
+    DEFAULT_PORT=3306
+  fi
+
   # Parse sql connection data
   DATABASE_USER=$(awk -F '[/:@]' '{print $4}' <<< "$DATABASE_URL")
   DATABASE_PASS=$(awk -F '[/:@]' '{print $5}' <<< "$DATABASE_URL")
@@ -13,11 +22,11 @@ function waitForDB() {
 
   re='^[0-9]+$'
   if ! [[ $DATABASE_PORT =~ $re ]] ; then
-     DATABASE_PORT=3306
+     DATABASE_PORT=$DEFAULT_PORT
   fi
 
   echo "Wait for database connection ..."
-  until php /dbtest.php "$DATABASE_HOST" "$DATABASE_BASE" "$DATABASE_PORT" "$DATABASE_USER" "$DATABASE_PASS"; do
+  until php /dbtest.php "$DATABASE_HOST" "$DATABASE_BASE" "$DATABASE_PORT" "$DATABASE_USER" "$DATABASE_PASS" "$DATABASE_DRIVER"; do
     echo Checking DB: $?
     sleep 3
   done
